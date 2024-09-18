@@ -58,3 +58,17 @@ merge_test(Config) ->
         <<"del">> => {maps_diff, delete, 10, undefined}},
     Merge = maps_diff:merge([Diff1, Diff2, Diff3, Diff4]),
     Config.
+
+%% 1> Diff1 = {maps_diff,add,undefined,#{hello => #{test => []}}}.
+%%{maps_diff,add,undefined,#{hello => #{test => []}}}
+%%2> Diff2 = #{hello =>
+%%2>       #{test =>
+%%2>             #{0 => {maps_diff,add,undefined,#{sdf => 123}},
+%%2>               1 => {maps_diff,add,undefined,#{sdf => 123}}}}}.
+%%#{hello =>
+%%      #{test =>
+%%            #{0 => {maps_diff,add,undefined,#{sdf => 123}},
+%%              1 => {maps_diff,add,undefined,#{sdf => 123}}}}}
+%%3> 
+%%3>
+%%3> maps_diff:merge(Diff1,Diff2).
