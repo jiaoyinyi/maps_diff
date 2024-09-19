@@ -8,7 +8,7 @@
 %%%-------------------------------------------------------------------
 -module(maps_diff).
 -export([
-    diff/2
+    diff/2, diff/3
     , merge/1, merge/2
 ]).
 
@@ -24,24 +24,40 @@
     , new
 }).
 
+%% maps对比中间数据
+-record(maps_diff_state, {
+    max_layer                        :: integer()                %% 比较最大层数
+    , layer                          :: pos_integer()            %% 当前层数
+}).
+
 %% @doc 比对
 -spec diff(map() | list(), map() | list()) -> map() | #maps_diff{}.
-diff(OldMap, NewMap) when is_map(OldMap) andalso is_map(NewMap) ->
-    diff_map(OldMap, NewMap);
-diff(OldList, NewList) when is_list(OldList) andalso is_list(NewList) ->
-    diff_list(OldList, NewList);
-diff(Old, New) when (is_map(Old) andalso is_list(New)) orelse (is_list(Old) andalso is_map(New)) ->
+diff(Old, New) ->
+    diff(Old, New, #{}).
+-spec diff(map() | list(), map() | list(), map()) -> map() | #maps_diff{}.
+diff(Old, New, Args) when is_map(Args) ->
+    MaxLayer = maps:get(max_layer, Args, infinity),
+    State = #maps_diff_state{max_layer = MaxLayer, layer = 0},
+    diff(Old, New, State);
+diff(OldMap, NewMap, State) when is_map(OldMap) andalso is_map(NewMap) ->
+    diff_map(OldMap, NewMap, State);
+diff(OldList, NewList, State) when is_list(OldList) andalso is_list(NewList) ->
+    diff_list(OldList, NewList, State);
+diff(Old, New, _State) when (is_map(Old) andalso is_list(New)) orelse (is_list(Old) andalso is_map(New)) ->
     #maps_diff{op = update, old = Old, new = New}.
 
-diff_map(OldMap, NewMap) when map_size(OldMap) =:= 0 andalso map_size(NewMap) =/= 0 ->
+diff_map(OldMap, NewMap, _State) when map_size(OldMap) =:= 0 andalso map_size(NewMap) =/= 0 ->
     #maps_diff{op = add, new = NewMap};
-diff_map(OldMap, NewMap) when map_size(OldMap) =/= 0 andalso map_size(NewMap) =:= 0 ->
+diff_map(OldMap, NewMap, _State) when map_size(OldMap) =/= 0 andalso map_size(NewMap) =:= 0 ->
     #maps_diff{op = delete, old = OldMap};
-diff_map(OldMap, NewMap) ->
-    DiffMap = diff_map_delete(OldMap, NewMap, #{}),
-    diff_map_add_update(OldMap, NewMap, DiffMap).
+diff_map(OldMap, NewMap, #maps_diff_state{layer = Layer, max_layer = MaxLayer}) when Layer >= MaxLayer ->
+    #maps_diff{op = update, old = OldMap, new = NewMap};
+diff_map(OldMap, NewMap, State) ->
+    NewState = acc_layer(State),
+    DiffMap = diff_map_delete(OldMap, NewMap, #{}, NewState),
+    diff_map_add_update(OldMap, NewMap, DiffMap, NewState).
 
-diff_map_delete(OldMap, NewMap, DiffMap) ->
+diff_map_delete(OldMap, NewMap, DiffMap, _State) ->
     maps:fold(
         fun(Key, Val, Acc) ->
             case maps:is_key(Key, NewMap) of
@@ -54,14 +70,14 @@ diff_map_delete(OldMap, NewMap, DiffMap) ->
         end, DiffMap, OldMap
     ).
 
-diff_map_add_update(OldMap, NewMap, DiffMap) ->
+diff_map_add_update(OldMap, NewMap, DiffMap, State) ->
     maps:fold(
         fun(Key, Val, Acc) ->
             case maps:find(Key, OldMap) of
                 {ok, Val} -> %% 相同
                     Acc;
                 {ok, OldVal} -> %% 更新
-                    Diff = diff_update(OldVal, Val),
+                    Diff = diff_update(OldVal, Val, State),
                     maps:put(Key, Diff, Acc);
                 error -> %% 新增
                     Diff = #maps_diff{op = add, new = Val},
@@ -70,31 +86,34 @@ diff_map_add_update(OldMap, NewMap, DiffMap) ->
         end, DiffMap, NewMap
     ).
 
-diff_list(OldList, NewList) ->
-    diff_list(OldList, NewList, #{}, 0).
+diff_list(OldList, NewList, #maps_diff_state{layer = Layer, max_layer = MaxLayer}) when Layer >= MaxLayer ->
+    #maps_diff{op = update, old = OldList, new = NewList};
+diff_list(OldList, NewList, State) ->
+    NewState = acc_layer(State),
+    diff_list(OldList, NewList, #{}, 0, NewState).
 
-diff_list([], [], DiffMap, _Idx) ->
+diff_list([], [], DiffMap, _Idx, _State) ->
     DiffMap;
-diff_list([I | OldList], [I | NewList], DiffMap, Idx) ->
-    diff_list(OldList, NewList, DiffMap, Idx + 1);
-diff_list([OldI | OldList], [NewI | NewList], DiffMap, Idx) ->
-    Diff = diff_update(OldI, NewI),
+diff_list([I | OldList], [I | NewList], DiffMap, Idx, State) ->
+    diff_list(OldList, NewList, DiffMap, Idx + 1, State);
+diff_list([OldI | OldList], [NewI | NewList], DiffMap, Idx, State) ->
+    Diff = diff_update(OldI, NewI, State),
     NewDiffMap = maps:put(Idx, Diff, DiffMap),
-    diff_list(OldList, NewList, NewDiffMap, Idx + 1);
-diff_list([OldI | OldList], [], DiffMap, Idx) ->
+    diff_list(OldList, NewList, NewDiffMap, Idx + 1, State);
+diff_list([OldI | OldList], [], DiffMap, Idx, State) ->
     Diff = #maps_diff{op = delete, old = OldI},
     NewDiffMap = maps:put(Idx, Diff, DiffMap),
-    diff_list(OldList, [], NewDiffMap, Idx + 1);
-diff_list([], [NewI | NewList], DiffMap, Idx) ->
+    diff_list(OldList, [], NewDiffMap, Idx + 1, State);
+diff_list([], [NewI | NewList], DiffMap, Idx, State) ->
     Diff = #maps_diff{op = add, new = NewI},
     NewDiffMap = maps:put(Idx, Diff, DiffMap),
-    diff_list([], NewList, NewDiffMap, Idx + 1).
+    diff_list([], NewList, NewDiffMap, Idx + 1, State).
 
-diff_update(OldVal, NewVal) when is_map(OldVal) andalso is_map(NewVal) ->
-    diff_map(OldVal, NewVal);
-diff_update(OldVal, NewVal) when is_list(OldVal) andalso is_list(NewVal) ->
-    diff_list(OldVal, NewVal);
-diff_update(OldVal, NewVal) ->
+diff_update(OldVal, NewVal, State) when is_map(OldVal) andalso is_map(NewVal) ->
+    diff_map(OldVal, NewVal, State);
+diff_update(OldVal, NewVal, State) when is_list(OldVal) andalso is_list(NewVal) ->
+    diff_list(OldVal, NewVal, State);
+diff_update(OldVal, NewVal, _State) ->
     #maps_diff{op = update, old = OldVal, new = NewVal}.
 
 %% @doc 合并对比
@@ -207,3 +226,7 @@ list_to_map([], _Idx, Map) ->
     Map;
 list_to_map([I | List], Idx, Map) ->
     list_to_map(List, Idx + 1, maps:put(Idx, I, Map)).
+
+%% 累加层数
+acc_layer(State) ->
+    State#maps_diff_state{layer = State#maps_diff_state.layer + 1}.
