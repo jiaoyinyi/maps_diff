@@ -25,7 +25,7 @@
 }).
 
 %% @doc 比对
--spec diff(map() | list(), map() | list()) -> map().
+-spec diff(map() | list(), map() | list()) -> map() | #maps_diff{}.
 diff(OldMap, NewMap) when is_map(OldMap) andalso is_map(NewMap) ->
     diff_map(OldMap, NewMap);
 diff(OldList, NewList) when is_list(OldList) andalso is_list(NewList) ->
@@ -145,7 +145,7 @@ merge_diff(OldDiff, #maps_diff{op = update, old = OldVal, new = NewVal}) when is
     #maps_diff{op = update, old = OldVal, new = NewVal};
 merge_diff(OldDiff, #maps_diff{op = delete, old = OldVal}) when is_map(OldDiff) -> %% 子值操作合并删除操作，更新为删除操作
     #maps_diff{op = delete, old = OldVal};
-merge_diff(#maps_diff{op = add, new = NewVal0}, NewDiff) when is_map(NewVal0) andalso is_map(NewDiff) -> %% 新增操作合并子值操作，更新新增操作的值
+merge_diff(#maps_diff{op = add, new = NewVal0}, NewDiff) when (is_map(NewVal0) orelse is_list(NewVal0)) andalso is_map(NewDiff) -> %% 新增操作合并子值操作，更新新增操作的值
     Ret =
         case merge_diff_vals(NewVal0, NewDiff) of
             remove ->
@@ -154,7 +154,7 @@ merge_diff(#maps_diff{op = add, new = NewVal0}, NewDiff) when is_map(NewVal0) an
                 #maps_diff{op = add, new = NewVal}
         end,
     Ret;
-merge_diff(#maps_diff{op = update, old = OldVal, new = NewVal0}, NewDiff) when is_map(NewVal0) andalso is_map(NewDiff) -> %% 更新操作合并子值操作，更新更新操作的值
+merge_diff(#maps_diff{op = update, old = OldVal, new = NewVal0}, NewDiff) when (is_map(NewVal0) orelse is_list(NewVal0)) andalso is_map(NewDiff) -> %% 更新操作合并子值操作，更新更新操作的值
     case merge_diff_vals(NewVal0, NewDiff) of
         remove ->
             remove;
@@ -165,10 +165,8 @@ merge_diff(OldDiff, NewDiff) when is_map(OldDiff) andalso is_map(NewDiff) -> %% 
     merge(OldDiff, NewDiff).
 
 merge_diff_vals(ValMap, DiffMap) when is_map(ValMap) ->
-    io:format("ValMap:~w, DiffMap:~w~n", [ValMap, DiffMap]),
     Ret = maps:fold(
         fun(Key, Diff, Acc) ->
-            io:format("Key:~w, Diff:~w, Acc:~w~n", [ValMap, DiffMap, Acc]),
             merge_diff_val(Acc, Key, Diff)
         end, ValMap, DiffMap
     ),
@@ -177,7 +175,16 @@ merge_diff_vals(ValMap, DiffMap) when is_map(ValMap) ->
             remove;
         _ ->
             Ret
-    end.
+    end;
+merge_diff_vals(ValList, DiffMap) when is_list(ValList) ->
+    ValMap = list_to_map(ValList),
+    Ret = maps:fold(
+        fun(Key, Diff, Acc) ->
+            merge_diff_val(Acc, Key, Diff)
+        end, ValMap, DiffMap
+    ),
+    maps:values(Ret).
+
 merge_diff_val(ValMap, Key, #maps_diff{op = add, new = Val}) ->
     maps:put(Key, Val, ValMap);
 merge_diff_val(ValMap, Key, #maps_diff{op = update, new = Val}) ->
@@ -192,3 +199,11 @@ merge_diff_val(ValMap, Key, DiffMap) when is_map(DiffMap) -> %% 子值还是maps
         NewVal ->
             maps:put(Key, NewVal, ValMap)
     end.
+
+%% 列表转maps
+list_to_map(List) ->
+    list_to_map(List, 0, #{}).
+list_to_map([], _Idx, Map) ->
+    Map;
+list_to_map([I | List], Idx, Map) ->
+    list_to_map(List, Idx + 1, maps:put(Idx, I, Map)).
