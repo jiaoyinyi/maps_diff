@@ -59,7 +59,7 @@ diff_map(OldMap, NewMap, State) ->
 
 diff_map_delete(OldMap, NewMap, DiffMap, _State) ->
     maps:fold(
-        fun(Key, Val, Acc) ->
+        fun(Key, Val, Acc) when is_atom(Key) orelse is_binary(Key) ->
             case maps:is_key(Key, NewMap) of
                 false ->
                     Diff = #maps_diff{op = delete, old = Val},
@@ -72,7 +72,7 @@ diff_map_delete(OldMap, NewMap, DiffMap, _State) ->
 
 diff_map_add_update(OldMap, NewMap, DiffMap, State) ->
     maps:fold(
-        fun(Key, Val, Acc) ->
+        fun(Key, Val, Acc) when is_atom(Key) orelse is_binary(Key) ->
             case maps:find(Key, OldMap) of
                 {ok, Val} -> %% 相同
                     Acc;
@@ -126,25 +126,42 @@ merge([OldDiffMap, NewDiffMap | DiffMaps]) ->
 merge(OldDiff = #maps_diff{}, NewDiff = #maps_diff{}) ->
     merge_diff(OldDiff, NewDiff);
 merge(OldDiff = #maps_diff{}, NewDiffMap) when is_map(NewDiffMap) ->
-    merge_diff(OldDiff, NewDiffMap);
+    case map_size(NewDiffMap) =:= 0 of
+        true ->
+            OldDiff;
+        false ->
+            merge_diff(OldDiff, NewDiffMap)
+    end;
 merge(OldDiffMap, NewDiff = #maps_diff{}) when is_map(OldDiffMap) ->
-    merge_diff(OldDiffMap, NewDiff);
+    case map_size(OldDiffMap) =:= 0 of
+        true ->
+            NewDiff;
+        false ->
+            merge_diff(OldDiffMap, NewDiff)
+    end;
 merge(OldDiffMap, NewDiffMap) when is_map(OldDiffMap) andalso is_map(NewDiffMap) ->
-    maps:fold(
-        fun(Key, Diff, Acc) ->
-            case maps:find(Key, Acc) of
-                {ok, NewDiff0} ->
-                    case merge_diff(Diff, NewDiff0) of
-                        remove ->
-                            maps:remove(Key, Acc);
-                        NewDiff ->
-                            maps:put(Key, NewDiff, Acc)
-                    end;
-                error ->
-                    maps:put(Key, Diff, Acc)
-            end
-        end, NewDiffMap, OldDiffMap
-    ).
+    if
+        map_size(OldDiffMap) =:= 0 ->
+            NewDiffMap;
+        map_size(NewDiffMap) =:= 0 ->
+            OldDiffMap;
+        true ->
+            maps:fold(
+                fun(Key, Diff, Acc) ->
+                    case maps:find(Key, Acc) of
+                        {ok, NewDiff0} ->
+                            case merge_diff(Diff, NewDiff0) of
+                                remove ->
+                                    maps:remove(Key, Acc);
+                                NewDiff ->
+                                    maps:put(Key, NewDiff, Acc)
+                            end;
+                        error ->
+                            maps:put(Key, Diff, Acc)
+                    end
+                end, NewDiffMap, OldDiffMap
+            )
+    end.
 
 merge_diff(#maps_diff{op = add}, #maps_diff{op = update, new = NewVal}) -> %% 新增操作合并更新操作，更新新增操作的值
     #maps_diff{op = add, new = NewVal};
