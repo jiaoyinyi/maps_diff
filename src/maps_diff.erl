@@ -26,30 +26,30 @@
 
 %% maps对比中间数据
 -record(maps_diff_state, {
-    max_layer                        :: integer()                %% 比较最大层数
-    , layer                          :: pos_integer()            %% 当前层数
+    max_layer                        :: non_neg_integer() |  infinity               %% 比较最大层数
+    , layer                          :: pos_integer()                               %% 当前层数
+    , old_empty_add                  :: boolean()                                   %% 旧数据为空，比较为add
 }).
 
-%% @doc 比对
+%% @doc 比对（数据格式由外部保证）
 -spec diff(map() | list(), map() | list()) -> map() | #maps_diff{}.
 diff(Old, New) ->
     diff(Old, New, #{}).
 -spec diff(map() | list(), map() | list(), map()) -> map() | #maps_diff{}.
 diff(Old, New, Args) when is_map(Args) ->
     MaxLayer = maps:get(max_layer, Args, infinity),
-    State = #maps_diff_state{max_layer = MaxLayer, layer = 0},
+    OldEmptyAdd = maps:get(old_empty_add, Args, false),
+    State = #maps_diff_state{max_layer = MaxLayer, layer = 0, old_empty_add = OldEmptyAdd},
     diff(Old, New, State);
-diff(OldMap, NewMap, State) when is_map(OldMap) andalso is_map(NewMap) ->
+diff(OldMap, NewMap, State = #maps_diff_state{}) when is_map(OldMap) andalso is_map(NewMap) ->
     diff_map(OldMap, NewMap, State);
-diff(OldList, NewList, State) when is_list(OldList) andalso is_list(NewList) ->
+diff(OldList, NewList, State = #maps_diff_state{}) when is_list(OldList) andalso is_list(NewList) ->
     diff_list(OldList, NewList, State);
-diff(Old, New, _State) when (is_map(Old) andalso is_list(New)) orelse (is_list(Old) andalso is_map(New)) ->
+diff(Old, New, #maps_diff_state{}) when (is_map(Old) andalso is_list(New)) orelse (is_list(Old) andalso is_map(New)) ->
     #maps_diff{op = update, old = Old, new = New}.
 
-diff_map(OldMap, NewMap, _State) when map_size(OldMap) =:= 0 andalso map_size(NewMap) =/= 0 ->
+diff_map(OldMap, NewMap, #maps_diff_state{layer = 0, old_empty_add = true}) when map_size(OldMap) =:= 0 andalso map_size(NewMap) =/= 0 ->
     #maps_diff{op = add, new = NewMap};
-diff_map(OldMap, NewMap, _State) when map_size(OldMap) =/= 0 andalso map_size(NewMap) =:= 0 ->
-    #maps_diff{op = delete, old = OldMap};
 diff_map(OldMap, NewMap, #maps_diff_state{layer = Layer, max_layer = MaxLayer}) when Layer >= MaxLayer ->
     #maps_diff{op = update, old = OldMap, new = NewMap};
 diff_map(OldMap, NewMap, State) ->
