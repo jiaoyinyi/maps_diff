@@ -17,12 +17,7 @@
 %% 值类型是数据类型，遍历对比
 %% 值类型是对象，递归对比
 
-%% maps对比信息
--record(maps_diff, {
-    op :: add | delete | update
-    , old
-    , new
-}).
+-include("maps_diff.hrl").
 
 %% maps对比中间数据
 -record(maps_diff_state, {
