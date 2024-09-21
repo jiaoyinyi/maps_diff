@@ -13,8 +13,8 @@
 
 -include("maps_diff.hrl").
 
--define(IS_MAP_KEY, (is_binary(Key) orelse is_atom(Key))).
--define(IS_ARRAY_KEY, (is_integer(Key) andalso Key >= 0)).
+-define(IS_MAP_KEY(Key), (is_binary(Key) orelse is_atom(Key))).
+-define(IS_ARRAY_KEY(Key), (is_integer(Key) andalso Key >= 0)).
 
 -spec translate(map()) -> map().
 translate(DiffMap) ->
